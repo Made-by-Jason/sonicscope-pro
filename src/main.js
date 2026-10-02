@@ -1,0 +1,1507 @@
+let audioContext;
+        let audioSource;
+        let analyser;
+        let gainNode;
+        let isPlaying = false;
+        let isPaused = false;
+        let isMicActive = false;
+        let mediaStream;
+        let isConnectedToFL = false;
+        let currentTime = 0;
+
+        let splitter;
+        let leftAnalyser;
+        let rightAnalyser;
+        let midSideProcessor;
+
+        const midSideCanvas = document.getElementById('mid-side-canvas');
+        const midSideCtx = midSideCanvas.getContext('2d');
+
+        const stereoFieldCanvas = document.getElementById('stereo-field-canvas');
+        const stereoFieldCtx = stereoFieldCanvas.getContext('2d');
+
+        const frequencyAnalyzerCanvas = document.getElementById('frequency-analyzer-canvas');
+        const frequencyAnalyzerCtx = frequencyAnalyzerCanvas.getContext('2d');
+
+        const correlationCanvas = document.getElementById('correlation-canvas');
+        const correlationCtx = correlationCanvas.getContext('2d');
+
+        const stereoWidthCanvas = document.getElementById('stereo-width-canvas');
+        const stereoWidthCtx = stereoWidthCanvas.getContext('2d');
+
+        const spectrogramCanvas = document.getElementById('spectrogram-canvas');
+        const spectrogramCtx = spectrogramCanvas.getContext('2d');
+
+        const micButton = document.getElementById('mic-button');
+        const fileInput = document.getElementById('audio-file-input');
+        const flConnectButton = document.getElementById('fl-connect-button');
+        const stopButton = document.getElementById('stop-button');
+        const pauseButton = document.getElementById('pause-button');
+        const exportButton = document.getElementById('export-analysis');
+        const audioPlayer = document.getElementById('audio-player');
+        const visualizerSpeed = document.getElementById('visualizer-speed');
+        const frequencyRange = document.getElementById('frequency-range');
+        const colorIntensity = document.getElementById('color-intensity');
+        const midSideBalance = document.getElementById('mid-side-balance');
+        const volumeControl = document.getElementById('volume-control');
+
+        const peakLMeter = document.getElementById('peak-l-meter');
+        const peakRMeter = document.getElementById('peak-r-meter');
+        const rmsMeter = document.getElementById('rms-meter');
+        const lufsMeter = document.getElementById('lufs-meter');
+        const crestMeter = document.getElementById('crest-meter');
+        const midMeter = document.getElementById('mid-meter');
+        const sideMeter = document.getElementById('side-meter');
+        const msRatioMeter = document.getElementById('ms-ratio-meter');
+        const correlationMeter = document.getElementById('correlation-meter');
+
+        const peakLValue = document.getElementById('peak-l-value');
+        const peakRValue = document.getElementById('peak-r-value');
+        const rmsValue = document.getElementById('rms-value');
+        const lufsValue = document.getElementById('lufs-value');
+        const crestValue = document.getElementById('crest-value');
+        const midValue = document.getElementById('mid-value');
+        const sideValue = document.getElementById('side-value');
+        const msRatioValue = document.getElementById('ms-ratio-value');
+        const correlationValue = document.getElementById('correlation-value');
+
+        const stereoFieldViewButtons = document.querySelectorAll('#stereo-field-module .view-selector button');
+        const frequencyViewButtons = document.querySelectorAll('#frequency-analyzer-module .view-selector button');
+
+        let currentStereoView = 'goniometer';
+        let currentFrequencyView = 'linear';
+
+        const assistantContent = document.getElementById('assistant-content');
+        const assistantModule = document.getElementById('mastering-assistant-module');
+
+        let flStudioBridge = {
+            isConnected: false,
+            channelData: null,
+            masterData: null,
+            oscillators: null,
+            gains: null,
+            connect: function() {
+                this.isConnected = true;
+                this.channelData = {
+                    name: "Master",
+                    volume: 0.8,
+                    pan: 0,
+                    peakL: 0,
+                    peakR: 0,
+                    rms: 0,
+                    effects: ["Fruity Limiter", "Maximus", "Parametric EQ 2", "Soundgoodizer"]
+                };
+                this.masterData = {
+                    tempo: 128,
+                    sampleRate: 44100,
+                    bitDepth: 32,
+                    playbackState: "stopped",
+                    projectName: "MyTrack.flp"
+                };
+                return true;
+            },
+            disconnect: function() {
+                this.isConnected = false;
+                this.channelData = null;
+                this.masterData = null;
+                return true;
+            },
+            getChannelData: function() {
+                return this.channelData;
+            },
+            getMasterData: function() {
+                return this.masterData;
+            },
+            startPlayback: function() {
+                if (this.isConnected) {
+                    this.masterData.playbackState = "playing";
+                    return true;
+                }
+                return false;
+            },
+            stopPlayback: function() {
+                if (this.isConnected) {
+                    this.masterData.playbackState = "stopped";
+                    return true;
+                }
+                return false;
+            },
+            receiveAudioData: function(audioContext, gainNode) {
+                if (!this.isConnected) return false;
+                const osc1 = audioContext.createOscillator();
+                const osc2 = audioContext.createOscillator();
+                const osc3 = audioContext.createOscillator();
+                const osc4 = audioContext.createOscillator();
+
+                osc1.type = 'sine';
+                osc2.type = 'sawtooth';
+                osc3.type = 'triangle';
+                osc4.type = 'square';
+
+                osc1.frequency.value = 220;
+                osc2.frequency.value = 440;
+                osc3.frequency.value = 880;
+                osc4.frequency.value = 110;
+
+                const gainNode1 = audioContext.createGain();
+                const gainNode2 = audioContext.createGain();
+                const gainNode3 = audioContext.createGain();
+                const gainNode4 = audioContext.createGain();
+
+                gainNode1.gain.value = 0.2;
+                gainNode2.gain.value = 0.1;
+                gainNode3.gain.value = 0.05;
+                gainNode4.gain.value = 0.15;
+
+                osc1.connect(gainNode1);
+                osc2.connect(gainNode2);
+                osc3.connect(gainNode3);
+                osc4.connect(gainNode4);
+
+                gainNode1.connect(gainNode);
+                gainNode2.connect(gainNode);
+                gainNode3.connect(gainNode);
+                gainNode4.connect(gainNode);
+
+                osc1.start();
+                osc2.start();
+                osc3.start();
+                osc4.start();
+
+                this.oscillators = [osc1, osc2, osc3, osc4];
+                this.gains = [gainNode1, gainNode2, gainNode3, gainNode4];
+
+                return true;
+            },
+            cleanup: function() {
+                if (this.oscillators) {
+                    this.oscillators.forEach(osc => {
+                        osc.stop();
+                        osc.disconnect();
+                    });
+                }
+                if (this.gains) {
+                    this.gains.forEach(gain => {
+                        gain.disconnect();
+                    });
+                }
+                this.oscillators = null;
+                this.gains = null;
+            }
+        };
+
+        function initAudio() {
+            if (!audioContext) {
+                try {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    console.log('AudioContext initialized');
+                } catch (e) {
+                    console.error('Failed to create AudioContext:', e);
+                    alert('Web Audio API is not supported in this browser.');
+                    return;
+                }
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 16384;
+                analyser.smoothingTimeConstant = 0.85;
+
+                splitter = audioContext.createChannelSplitter(2);
+
+                leftAnalyser = audioContext.createAnalyser();
+                leftAnalyser.fftSize = 4096;
+                leftAnalyser.smoothingTimeConstant = 0.85;
+
+                rightAnalyser = audioContext.createAnalyser();
+                rightAnalyser.fftSize = 4096;
+                rightAnalyser.smoothingTimeConstant = 0.85;
+
+                gainNode = audioContext.createGain();
+                gainNode.gain.value = 1;
+
+                gainNode.connect(analyser);
+                gainNode.connect(splitter);
+                splitter.connect(leftAnalyser, 0);
+                splitter.connect(rightAnalyser, 1);
+                analyser.connect(audioContext.destination);
+
+                midSideProcessor = {
+                    mid: new Float32Array(analyser.frequencyBinCount),
+                    side: new Float32Array(analyser.frequencyBinCount)
+                };
+            }
+        }
+
+        function resizeCanvases() {
+            const canvases = [
+                midSideCanvas, stereoFieldCanvas, frequencyAnalyzerCanvas,
+                correlationCanvas, stereoWidthCanvas, spectrogramCanvas
+            ];
+            canvases.forEach(canvas => {
+                const rect = canvas.getBoundingClientRect();
+                canvas.width = rect.width * window.devicePixelRatio;
+                canvas.height = rect.height * window.devicePixelRatio;
+                const ctx = canvas.getContext('2d');
+                ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+            });
+        }
+
+        micButton.addEventListener('click', async () => {
+            try {
+                initAudio();
+                if (isMicActive) {
+                    stopAudio();
+                    return;
+                }
+                stopAudio();
+                mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                audioPlayer.srcObject = mediaStream;
+                audioPlayer.play().catch(e => console.error('Auto-play failed for mic:', e));
+                audioSource = audioContext.createMediaElementSource(audioPlayer);
+                audioSource.connect(gainNode);
+                isPlaying = true;
+                isMicActive = true;
+                micButton.textContent = 'Stop Microphone';
+                startVisualizers();
+                simulateMasteringAssistant('Analyzing microphone input...');
+            } catch (error) {
+                console.error('Error accessing microphone:', error);
+                alert('Could not access microphone. Please check permissions.');
+            }
+        });
+
+        fileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const url = URL.createObjectURL(file);
+                audioPlayer.src = url;
+                initAudio();
+                stopAudio();
+                audioPlayer.onplay = () => {
+                    if (!audioSource || !audioSource.mediaElement) {
+                        audioSource = audioContext.createMediaElementSource(audioPlayer);
+                        audioSource.connect(gainNode);
+                    }
+                    isPlaying = true;
+                    startVisualizers();
+                    simulateMasteringAssistant(`Analyzing "${file.name}"...`);
+                };
+                audioPlayer.onpause = () => {
+                    isPlaying = false;
+                };
+                audioPlayer.onended = () => {
+                    isPlaying = false;
+                };
+                // Auto play after load
+                audioPlayer.play().catch(e => console.error('Auto-play failed for file:', e));
+            }
+        });
+
+        flConnectButton.addEventListener('click', () => {
+            initAudio();
+            if (isConnectedToFL) {
+                disconnectFromFLStudio();
+                return;
+            }
+            connectToFLStudio();
+        });
+
+        function connectToFLStudio() {
+            stopAudio();
+            if (flStudioBridge.connect()) {
+                isConnectedToFL = true;
+                flConnectButton.textContent = 'Disconnect from FL Studio';
+                flStudioBridge.receiveAudioData(audioContext, gainNode);
+                isPlaying = true;
+                startVisualizers();
+                simulateMasteringAssistant('Connected to FL Studio. Analyzing master output...');
+                setTimeout(() => {
+                    const masterData = flStudioBridge.getMasterData();
+                    const channelData = flStudioBridge.getChannelData();
+                    assistantContent.innerHTML = `
+                        Connected to FL Studio<br>
+                        • Project: ${masterData.projectName}<br>
+                        • Channel: ${channelData.name}<br>
+                        • Tempo: ${masterData.tempo} BPM<br>
+                        • Sample: ${masterData.sampleRate}Hz / ${masterData.bitDepth}-bit<br>
+                        • Effects: ${channelData.effects.join(', ')}
+                    `;
+                }, 1500);
+            } else {
+                alert('Could not connect to FL Studio. Please make sure FL Studio is running.');
+            }
+        }
+
+        function disconnectFromFLStudio() {
+            if (flStudioBridge.disconnect()) {
+                isConnectedToFL = false;
+                flConnectButton.textContent = 'Connect to FL Studio';
+                flStudioBridge.cleanup();
+                stopAudio();
+            }
+        }
+
+        stopButton.addEventListener('click', stopAudio);
+
+        function stopAudio() {
+            if (audioSource) {
+                audioSource.disconnect();
+                audioSource = null;
+            }
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                mediaStream = null;
+            }
+            if (audioPlayer) {
+                audioPlayer.pause();
+                audioPlayer.currentTime = 0;
+                audioPlayer.src = '';
+                audioPlayer.srcObject = null;
+            }
+            if (isConnectedToFL) {
+                flStudioBridge.cleanup();
+            }
+            if (audioContext) audioContext.close().then(() => audioContext = null);
+            isPlaying = false;
+            isPaused = false;
+            isMicActive = false;
+            currentTime = 0;
+            micButton.textContent = 'Use Microphone';
+            pauseButton.textContent = 'Pause';
+            resetMeters();
+            assistantModule.classList.remove('assistant-active');
+            assistantContent.textContent = 'Waiting for audio input to analyze...';
+        }
+
+        function resetMeters() {
+            peakLMeter.style.width = '0%';
+            peakRMeter.style.width = '0%';
+            rmsMeter.style.width = '0%';
+            lufsMeter.style.width = '0%';
+            crestMeter.style.width = '0%';
+            midMeter.style.width = '0%';
+            sideMeter.style.width = '0%';
+            msRatioMeter.style.width = '0%';
+            correlationMeter.style.width = '0%';
+
+            peakLValue.textContent = '-∞ dB';
+            peakRValue.textContent = '-∞ dB';
+            rmsValue.textContent = '-∞ dB';
+            lufsValue.textContent = '-∞ LUFS';
+            crestValue.textContent = '0 dB';
+            midValue.textContent = '-∞ dB';
+            sideValue.textContent = '-∞ dB';
+            msRatioValue.textContent = '1:1';
+            correlationValue.textContent = '0.0';
+        }
+
+        pauseButton.addEventListener('click', () => {
+            if (!isPlaying) return;
+            if (isPaused) {
+                resumeAudio();
+            } else {
+                pauseAudio();
+            }
+        });
+
+        function pauseAudio() {
+            audioContext.suspend();
+            if (!isConnectedToFL) audioPlayer.pause();
+            isPaused = true;
+            pauseButton.textContent = 'Resume';
+        }
+
+        function resumeAudio() {
+            audioContext.resume();
+            if (!isConnectedToFL) audioPlayer.play();
+            isPaused = false;
+            pauseButton.textContent = 'Pause';
+        }
+
+        volumeControl.addEventListener('input', (e) => {
+            gainNode.gain.value = parseFloat(e.target.value);
+        });
+
+        exportButton.addEventListener('click', () => {
+            if (!isPlaying) {
+                alert('No active audio to export analysis.');
+                return;
+            }
+            const data = JSON.stringify(lastMetrics || {});
+            const blob = new Blob([data], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'sonicscope-analysis.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+        let lastMetrics = {};
+
+        function startVisualizers() {
+            if (!analyser) return;
+            resizeCanvases();
+            const frequencyBinCount = analyser.frequencyBinCount;
+            const frequencyData = new Uint8Array(frequencyBinCount);
+            const timeDomainData = new Uint8Array(frequencyBinCount);
+            const leftFrequencyData = new Uint8Array(leftAnalyser.frequencyBinCount);
+            const rightFrequencyData = new Uint8Array(rightAnalyser.frequencyBinCount);
+            const leftTimeDomainData = new Uint8Array(leftAnalyser.frequencyBinCount);
+            const rightTimeDomainData = new Uint8Array(rightAnalyser.frequencyBinCount);
+            let spectrogramOffset = 0;
+            const waterfallHistory = [];
+            const waterfallLines = 100;
+
+            function draw() {
+                if (!isPlaying || isPaused) return;
+                const speed = parseFloat(visualizerSpeed.value);
+                setTimeout(() => {
+                    requestAnimationFrame(draw);
+                }, 1000 / (60 * speed));
+
+                analyser.getByteFrequencyData(frequencyData);
+                analyser.getByteTimeDomainData(timeDomainData);
+                leftAnalyser.getByteFrequencyData(leftFrequencyData);
+                leftAnalyser.getByteTimeDomainData(leftTimeDomainData);
+                rightAnalyser.getByteFrequencyData(rightFrequencyData);
+                rightAnalyser.getByteTimeDomainData(rightTimeDomainData);
+
+                calculateMidSide(leftFrequencyData, rightFrequencyData);
+                const metrics = calculateAudioMetrics(timeDomainData, frequencyData, leftTimeDomainData, rightTimeDomainData);
+                lastMetrics = metrics;
+                updateMeters(metrics);
+
+                drawMidSide(midSideProcessor.mid, midSideProcessor.side);
+                switch (currentStereoView) {
+                    case 'goniometer':
+                        drawGoniometer(leftTimeDomainData, rightTimeDomainData);
+                        break;
+                    case 'vectorscope':
+                        drawVectorscope(leftTimeDomainData, rightTimeDomainData);
+                        break;
+                    case 'stereo-image':
+                        drawStereoImage(leftFrequencyData, rightFrequencyData);
+                        break;
+                }
+                switch (currentFrequencyView) {
+                    case 'linear':
+                        drawFrequencyAnalyzer(frequencyData, 'linear');
+                        break;
+                    case 'logarithmic':
+                        drawFrequencyAnalyzer(frequencyData, 'logarithmic');
+                        break;
+                    case 'mid-side':
+                        drawMidSideFrequency(midSideProcessor.mid, midSideProcessor.side);
+                        break;
+                    case 'left-right':
+                        drawLeftRightFrequency(leftFrequencyData, rightFrequencyData);
+                        break;
+                    case 'waterfall':
+                        drawWaterfallView(frequencyData, waterfallHistory, waterfallLines);
+                        break;
+                }
+                drawCorrelation(metrics.correlation);
+                drawStereoWidth(leftFrequencyData, rightFrequencyData);
+                drawSpectrogram(frequencyData, spectrogramOffset);
+                spectrogramOffset = (spectrogramOffset + 1) % spectrogramCanvas.width;
+                if (isConnectedToFL) updateFLStudioData(metrics);
+            }
+            draw();
+        }
+
+        function updateFLStudioData(metrics) {
+            if (!flStudioBridge.isConnected) return;
+            const channelData = flStudioBridge.getChannelData();
+            if (channelData) {
+                channelData.peakL = metrics.peakL;
+                channelData.peakR = metrics.peakR;
+                channelData.rms = metrics.rms;
+            }
+        }
+
+        function calculateMidSide(leftFreq, rightFreq) {
+            const midSideRatio = parseFloat(midSideBalance.value);
+            for (let i = 0; i < leftFreq.length; i++) {
+                const leftVal = leftFreq[i] / 255;
+                const rightVal = rightFreq[i] / 255;
+                const mid = (leftVal + rightVal) / 2;
+                const side = (leftVal - rightVal) / 2;
+                midSideProcessor.mid[i] = mid;
+                midSideProcessor.side[i] = side;
+            }
+        }
+
+        function calculateAudioMetrics(timeDomainData, frequencyData, leftData, rightData) {
+            let peakL = 0, peakR = 0;
+            for (let i = 0; i < leftData.length; i++) {
+                const leftAmp = Math.abs((leftData[i] / 128.0) - 1.0);
+                const rightAmp = Math.abs((rightData[i] / 128.0) - 1.0);
+                peakL = Math.max(peakL, leftAmp);
+                peakR = Math.max(peakR, rightAmp);
+            }
+            let sumL = 0, sumR = 0;
+            for (let i = 0; i < leftData.length; i++) {
+                const leftAmp = ((leftData[i] / 128.0) - 1.0);
+                const rightAmp = ((rightData[i] / 128.0) - 1.0);
+                sumL += leftAmp * leftAmp;
+                sumR += rightAmp * rightAmp;
+            }
+            const rmsL = Math.sqrt(sumL / leftData.length);
+            const rmsR = Math.sqrt(sumR / rightData.length);
+            const rms = (rmsL + rmsR) / 2;
+            let midSum = 0, sideSum = 0;
+            for (let i = 0; i < midSideProcessor.mid.length; i++) {
+                midSum += midSideProcessor.mid[i] * midSideProcessor.mid[i];
+                sideSum += midSideProcessor.side[i] * midSideProcessor.side[i];
+            }
+            const midLevel = Math.sqrt(midSum / midSideProcessor.mid.length);
+            const sideLevel = Math.sqrt(sideSum / midSideProcessor.side.length);
+            const msRatio = midLevel > 0 ? sideLevel / midLevel : 0;
+            let correlation = 0;
+            let sumLeftRight = 0, sumLeftSquared = 0, sumRightSquared = 0;
+            for (let i = 0; i < leftData.length; i++) {
+                const leftAmp = ((leftData[i] / 128.0) - 1.0);
+                const rightAmp = ((rightData[i] / 128.0) - 1.0);
+                sumLeftRight += leftAmp * rightAmp;
+                sumLeftSquared += leftAmp * leftAmp;
+                sumRightSquared += rightAmp * rightAmp;
+            }
+            if (sumLeftSquared > 0 && sumRightSquared > 0) {
+                correlation = sumLeftRight / Math.sqrt(sumLeftSquared * sumRightSquared);
+            }
+            const lufs = rms * 0.75;
+            const peak = Math.max(peakL, peakR);
+            const crestFactor = peak > 0 && rms > 0 ? peak / rms : 1;
+            const peakLdB = peakL > 0 ? 20 * Math.log10(peakL) : -100;
+            const peakRdB = peakR > 0 ? 20 * Math.log10(peakR) : -100;
+            const rmsdB = rms > 0 ? 20 * Math.log10(rms) : -100;
+            const lufsdB = lufs > 0 ? 20 * Math.log10(lufs) - 23 : -100;
+            const crestFactordB = 20 * Math.log10(crestFactor);
+            const midLeveldB = midLevel > 0 ? 20 * Math.log10(midLevel) : -100;
+            const sideLeveldB = sideLevel > 0 ? 20 * Math.log10(sideLevel) : -100;
+            return {
+                peakL, peakR, rms, lufs, crestFactor, midLevel, sideLevel, msRatio, correlation,
+                peakLdB, peakRdB, rmsdB, lufsdB, crestFactordB, midLeveldB, sideLeveldB
+            };
+        }
+
+        function updateMeters(metrics) {
+            const dbToPercent = (db) => Math.max(0, Math.min(100, (db + 60) * 100 / 60));
+            peakLMeter.style.width = `${dbToPercent(metrics.peakLdB)}%`;
+            peakRMeter.style.width = `${dbToPercent(metrics.peakRdB)}%`;
+            rmsMeter.style.width = `${dbToPercent(metrics.rmsdB)}%`;
+            lufsMeter.style.width = `${dbToPercent(metrics.lufsdB)}%`;
+            crestMeter.style.width = `${Math.min(100, metrics.crestFactordB * 5)}%`;
+            midMeter.style.width = `${dbToPercent(metrics.midLeveldB)}%`;
+            sideMeter.style.width = `${dbToPercent(metrics.sideLeveldB)}%`;
+            msRatioMeter.style.width = `${Math.min(100, metrics.msRatio * 100)}%`;
+            const correlationPercent = (metrics.correlation + 1) * 50;
+            correlationMeter.style.width = `${correlationPercent}%`;
+            if (metrics.correlation > 0.5) {
+                correlationMeter.style.backgroundColor = '#53bf9d';
+            } else if (metrics.correlation > 0) {
+                correlationMeter.style.backgroundColor = '#f9a826';
+            } else {
+                correlationMeter.style.backgroundColor = '#ff5555';
+            }
+            peakLValue.textContent = `${metrics.peakLdB.toFixed(1)} dB`;
+            peakRValue.textContent = `${metrics.peakRdB.toFixed(1)} dB`;
+            rmsValue.textContent = `${metrics.rmsdB.toFixed(1)} dB`;
+            lufsValue.textContent = `${metrics.lufsdB.toFixed(1)} LUFS`;
+            crestValue.textContent = `${metrics.crestFactordB.toFixed(1)} dB`;
+            midValue.textContent = `${metrics.midLeveldB.toFixed(1)} dB`;
+            sideValue.textContent = `${metrics.sideLeveldB.toFixed(1)} dB`;
+            msRatioValue.textContent = `${metrics.msRatio.toFixed(2)}:1`;
+            correlationValue.textContent = metrics.correlation.toFixed(2);
+        }
+
+        function drawMidSide(midData, sideData) {
+            const width = midSideCanvas.width / window.devicePixelRatio;
+            const height = midSideCanvas.height / window.devicePixelRatio;
+
+            midSideCtx.clearRect(0, 0, width, height);
+
+            // Draw background
+            midSideCtx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+            midSideCtx.fillRect(0, 0, width, height);
+
+            // Calculate average mid and side values
+            let midSum = 0, sideSum = 0;
+            for (let i = 0; i < midData.length; i++) {
+                midSum += midData[i];
+                sideSum += sideData[i];
+            }
+            const midAvg = midSum / midData.length;
+            const sideAvg = sideSum / sideData.length;
+
+            // Draw mid/side balance point
+            const x = width * 0.5 * (1 + (sideAvg - midAvg) * 2);
+            const y = height * 0.5;
+            const radius = Math.min(width, height) * 0.1;
+
+            // Draw center line
+            midSideCtx.strokeStyle = 'var(--grid-color)';
+            midSideCtx.lineWidth = 1;
+            midSideCtx.beginPath();
+            midSideCtx.moveTo(width / 2, 0);
+            midSideCtx.lineTo(width / 2, height);
+            midSideCtx.stroke();
+
+            // Draw labels
+            midSideCtx.fillStyle = 'var(--text-color)';
+            midSideCtx.font = '12px Roboto Mono';
+            midSideCtx.textAlign = 'center';
+            midSideCtx.fillText('MID', width * 0.25, height - 10);
+            midSideCtx.fillText('SIDE', width * 0.75, height - 10);
+
+            // Draw balance indicator
+            const gradient = midSideCtx.createRadialGradient(x, y, 0, x, y, radius);
+            gradient.addColorStop(0, 'rgba(83, 191, 157, 0.8)');
+            gradient.addColorStop(1, 'rgba(83, 191, 157, 0.1)');
+
+            midSideCtx.fillStyle = gradient;
+            midSideCtx.beginPath();
+            midSideCtx.arc(x, y, radius, 0, Math.PI * 2);
+            midSideCtx.fill();
+        }
+
+        function drawGoniometer(leftData, rightData) {
+            const width = stereoFieldCanvas.width / window.devicePixelRatio;
+            const height = stereoFieldCanvas.height / window.devicePixelRatio;
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const radius = Math.min(centerX, centerY) * 0.8;
+
+            stereoFieldCtx.clearRect(0, 0, width, height);
+
+            // Draw background grid
+            stereoFieldCtx.strokeStyle = 'var(--grid-color)';
+            stereoFieldCtx.lineWidth = 1;
+
+            // Draw circles
+            for (let i = 1; i <= 3; i++) {
+                stereoFieldCtx.beginPath();
+                stereoFieldCtx.arc(centerX, centerY, radius * i / 3, 0, 2 * Math.PI);
+                stereoFieldCtx.stroke();
+            }
+
+            // Draw cross
+            stereoFieldCtx.beginPath();
+            stereoFieldCtx.moveTo(centerX, centerY - radius);
+            stereoFieldCtx.lineTo(centerX, centerY + radius);
+            stereoFieldCtx.moveTo(centerX - radius, centerY);
+            stereoFieldCtx.lineTo(centerX + radius, centerY);
+            stereoFieldCtx.stroke();
+
+            // Draw labels
+            stereoFieldCtx.fillStyle = 'var(--text-color)';
+            stereoFieldCtx.font = '12px Roboto Mono';
+            stereoFieldCtx.textAlign = 'center';
+
+            stereoFieldCtx.fillText('L+R', centerX, centerY - radius - 5);
+            stereoFieldCtx.fillText('L-R', centerX, centerY + radius + 15);
+            stereoFieldCtx.textAlign = 'right';
+            stereoFieldCtx.fillText('L', centerX - radius - 5, centerY);
+            stereoFieldCtx.textAlign = 'left';
+            stereoFieldCtx.fillText('R', centerX + radius + 5, centerY);
+
+            // Draw phase correlation
+            stereoFieldCtx.fillStyle = 'rgba(0, 196, 255, 0.1)';
+
+            // Plot points
+            const step = Math.max(1, Math.floor(leftData.length / 1000));
+            for (let i = 0; i < leftData.length; i += step) {
+                const leftAmp = ((leftData[i] / 128.0) - 1.0);
+                const rightAmp = ((rightData[i] / 128.0) - 1.0);
+
+                const x = centerX + (rightAmp + leftAmp) * radius * 0.5;
+                const y = centerY + (rightAmp - leftAmp) * radius * 0.5;
+
+                stereoFieldCtx.beginPath();
+                stereoFieldCtx.arc(x, y, 1.5, 0, 2 * Math.PI);
+                stereoFieldCtx.fill();
+            }
+        }
+
+        function drawVectorscope(leftData, rightData) {
+            const width = stereoFieldCanvas.width / window.devicePixelRatio;
+            const height = stereoFieldCanvas.height / window.devicePixelRatio;
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const radius = Math.min(centerX, centerY) * 0.8;
+
+            stereoFieldCtx.clearRect(0, 0, width, height);
+
+            // Draw background
+            stereoFieldCtx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+            stereoFieldCtx.fillRect(0, 0, width, height);
+
+            // Draw grid
+            stereoFieldCtx.strokeStyle = 'var(--grid-color)';
+            stereoFieldCtx.lineWidth = 1;
+
+            // Draw circles
+            for (let i = 1; i <= 3; i++) {
+                stereoFieldCtx.beginPath();
+                stereoFieldCtx.arc(centerX, centerY, radius * i / 3, 0, 2 * Math.PI);
+                stereoFieldCtx.stroke();
+            }
+
+            // Draw axes
+            stereoFieldCtx.beginPath();
+            stereoFieldCtx.moveTo(centerX - radius, centerY);
+            stereoFieldCtx.lineTo(centerX + radius, centerY);
+            stereoFieldCtx.moveTo(centerX, centerY - radius);
+            stereoFieldCtx.lineTo(centerX, centerY + radius);
+            stereoFieldCtx.stroke();
+
+            // Draw labels
+            stereoFieldCtx.fillStyle = 'var(--text-color)';
+            stereoFieldCtx.font = '12px Roboto Mono';
+            stereoFieldCtx.textAlign = 'center';
+            stereoFieldCtx.fillText('90°', centerX, centerY - radius - 5);
+            stereoFieldCtx.fillText('270°', centerX, centerY + radius + 15);
+            stereoFieldCtx.textAlign = 'right';
+            stereoFieldCtx.fillText('180°', centerX - radius - 5, centerY);
+            stereoFieldCtx.textAlign = 'left';
+            stereoFieldCtx.fillText('0°', centerX + radius + 5, centerY);
+
+            // Create offscreen canvas for better performance with many points
+            const offscreenCanvas = document.createElement('canvas');
+            offscreenCanvas.width = width;
+            offscreenCanvas.height = height;
+            const offCtx = offscreenCanvas.getContext('2d');
+
+            // Draw vectorscope points with color based on frequency
+            offCtx.fillStyle = 'rgba(0, 196, 255, 0.5)';
+
+            const step = Math.max(1, Math.floor(leftData.length / 2000));
+            for (let i = 0; i < leftData.length; i += step) {
+                const leftAmp = ((leftData[i] / 128.0) - 1.0);
+                const rightAmp = ((rightData[i] / 128.0) - 1.0);
+
+                // Calculate phase and magnitude
+                const phase = Math.atan2(rightAmp, leftAmp);
+                const magnitude = Math.sqrt(leftAmp * leftAmp + rightAmp * rightAmp) * 0.7;
+
+                const x = centerX + Math.cos(phase) * magnitude * radius;
+                const y = centerY + Math.sin(phase) * magnitude * radius;
+
+                // Color based on position (hue rotation)
+                const hue = ((phase + Math.PI) / (2 * Math.PI)) * 360;
+                offCtx.fillStyle = `hsla(${hue}, 80%, 60%, 0.5)`;
+
+                offCtx.beginPath();
+                offCtx.arc(x, y, 1.5, 0, 2 * Math.PI);
+                offCtx.fill();
+            }
+
+            // Draw the offscreen canvas to the main canvas
+            stereoFieldCtx.drawImage(offscreenCanvas, 0, 0);
+        }
+
+        function drawStereoImage(leftFreqData, rightFreqData) {
+            const width = stereoFieldCanvas.width / window.devicePixelRatio;
+            const height = stereoFieldCanvas.height / window.devicePixelRatio;
+
+            stereoFieldCtx.clearRect(0, 0, width, height);
+
+            // Draw background
+            stereoFieldCtx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+            stereoFieldCtx.fillRect(0, 0, width, height);
+
+            // Draw grid lines
+            stereoFieldCtx.strokeStyle = 'var(--grid-color)';
+            stereoFieldCtx.lineWidth = 1;
+
+            // Horizontal lines
+            for (let i = 0; i <= 10; i++) {
+                const y = height * i / 10;
+                stereoFieldCtx.beginPath();
+                stereoFieldCtx.moveTo(0, y);
+                stereoFieldCtx.lineTo(width, y);
+                stereoFieldCtx.stroke();
+            }
+
+            // Vertical lines (frequency bands)
+            for (let i = 0; i <= 10; i++) {
+                const x = width * i / 10;
+                stereoFieldCtx.beginPath();
+                stereoFieldCtx.moveTo(x, 0);
+                stereoFieldCtx.lineTo(x, height);
+                stereoFieldCtx.stroke();
+            }
+
+            // Draw frequency labels
+            stereoFieldCtx.fillStyle = 'var(--text-color)';
+            stereoFieldCtx.font = '10px Roboto Mono';
+            stereoFieldCtx.textAlign = 'center';
+
+            const freqLabels = ['20', '50', '100', '200', '500', '1k', '2k', '5k', '10k', '20k'];
+            for (let i = 0; i < freqLabels.length; i++) {
+                const x = width * (i + 0.5) / freqLabels.length;
+                stereoFieldCtx.fillText(freqLabels[i], x, height - 5);
+            }
+
+            // Calculate and draw stereo width per frequency band
+            const bands = 10;
+            const samplesPerBand = Math.floor(leftFreqData.length / bands);
+
+            for (let band = 0; band < bands; band++) {
+                let leftSum = 0, rightSum = 0;
+
+                // Calculate average energy in this frequency band
+                for (let i = 0; i < samplesPerBand; i++) {
+                    const idx = band * samplesPerBand + i;
+                    if (idx < leftFreqData.length) {
+                        leftSum += leftFreqData[idx] / 255;
+                        rightSum += rightFreqData[idx] / 255;
+                    }
+                }
+
+                const leftAvg = leftSum / samplesPerBand;
+                const rightAvg = rightSum / samplesPerBand;
+
+                // Calculate stereo width for this band
+                const mid = (leftAvg + rightAvg) / 2;
+                const side = Math.abs(leftAvg - rightAvg);
+                const width_factor = mid > 0 ? side / mid : 0;
+
+                // Draw stereo width bar
+                const x = width * (band + 0.1) / bands;
+                const barWidth = width * 0.8 / bands;
+                const barHeight = height * Math.min(1, width_factor);
+
+                // Create gradient based on stereo width
+                const gradient = stereoFieldCtx.createLinearGradient(0, height, 0, height - barHeight);
+                gradient.addColorStop(0, 'rgba(0, 196, 255, 0.3)');
+                gradient.addColorStop(1, 'rgba(0, 196, 255, 0.7)');
+
+                stereoFieldCtx.fillStyle = gradient;
+                stereoFieldCtx.fillRect(x, height - barHeight, barWidth, barHeight);
+
+                // Draw left/right balance indicator
+                const balance = leftAvg > 0 || rightAvg > 0 ?
+                    (rightAvg - leftAvg) / (rightAvg + leftAvg) : 0;
+
+                const centerX = x + barWidth / 2;
+                const indicatorX = centerX + balance * barWidth / 2;
+
+                stereoFieldCtx.fillStyle = 'white';
+                stereoFieldCtx.beginPath();
+                stereoFieldCtx.arc(indicatorX, height - barHeight - 5, 3, 0, Math.PI * 2);
+                stereoFieldCtx.fill();
+            }
+
+            // Draw legend
+            stereoFieldCtx.fillStyle = 'var(--text-color)';
+            stereoFieldCtx.textAlign = 'left';
+            stereoFieldCtx.fillText('Stereo Width', 10, 20);
+            stereoFieldCtx.fillText('L/R Balance', 10, 40);
+        }
+
+        function drawFrequencyAnalyzer(frequencyData, scale) {
+            const width = frequencyAnalyzerCanvas.width / window.devicePixelRatio;
+            const height = frequencyAnalyzerCanvas.height / window.devicePixelRatio;
+
+            frequencyAnalyzerCtx.clearRect(0, 0, width, height);
+
+            // Draw background grid
+            frequencyAnalyzerCtx.strokeStyle = 'var(--grid-color)';
+            frequencyAnalyzerCtx.lineWidth = 1;
+
+            // Horizontal lines (amplitude in dB)
+            const dbLines = [-60, -48, -36, -24, -12, 0];
+            for (let i = 0; i < dbLines.length; i++) {
+                const db = dbLines[i];
+                const y = height * (1 - (db + 60) / 60);
+
+                frequencyAnalyzerCtx.beginPath();
+                frequencyAnalyzerCtx.moveTo(0, y);
+                frequencyAnalyzerCtx.lineTo(width, y);
+                frequencyAnalyzerCtx.stroke();
+
+                // dB labels
+                frequencyAnalyzerCtx.fillStyle = 'var(--text-color)';
+                frequencyAnalyzerCtx.font = '10px Roboto Mono';
+                frequencyAnalyzerCtx.textAlign = 'right';
+                frequencyAnalyzerCtx.fillText(`${db} dB`, width - 5, y - 2);
+            }
+
+            // Draw frequency spectrum
+            const rangeFactor = parseFloat(frequencyRange.value);
+            const colorFactor = parseFloat(colorIntensity.value);
+
+            // Determine frequency scaling based on view
+            const isLog = scale === 'logarithmic';
+
+            // Create gradient for spectrum
+            const gradient = frequencyAnalyzerCtx.createLinearGradient(0, height, 0, 0);
+            gradient.addColorStop(0, `rgba(0, 196, 255, ${0.7 * colorFactor})`);
+            gradient.addColorStop(0.5, `rgba(0, 196, 255, ${0.5 * colorFactor})`);
+            gradient.addColorStop(1, `rgba(255, 136, 0, ${0.7 * colorFactor})`);
+
+            frequencyAnalyzerCtx.fillStyle = gradient;
+
+            // Draw frequency bars
+            const usableFreqBins = Math.floor(frequencyData.length * rangeFactor);
+            const barWidth = width / usableFreqBins;
+
+            for (let i = 0; i < usableFreqBins; i++) {
+                // Apply logarithmic or linear scaling to x-position
+                let xPos;
+                if (isLog) {
+                    // Logarithmic scale (better for audio frequencies)
+                    const logIndex = Math.pow(i / usableFreqBins, 4) * usableFreqBins;
+                    xPos = i * width / usableFreqBins;
+                    const value = frequencyData[Math.floor(logIndex)] / 255.0;
+                    const barHeight = value * height;
+                    frequencyAnalyzerCtx.fillRect(xPos, height - barHeight, barWidth + 0.5, barHeight);
+                } else {
+                    // Linear scale
+                    xPos = i * width / usableFreqBins;
+                    const value = frequencyData[i] / 255.0;
+                    const barHeight = value * height;
+                    frequencyAnalyzerCtx.fillRect(xPos, height - barHeight, barWidth + 0.5, barHeight);
+                }
+            }
+
+            // Draw spectrum line on top
+            frequencyAnalyzerCtx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            frequencyAnalyzerCtx.lineWidth = 2;
+            frequencyAnalyzerCtx.beginPath();
+
+            for (let i = 0; i < usableFreqBins; i++) {
+                let xPos, value;
+
+                if (isLog) {
+                    const logIndex = Math.pow(i / usableFreqBins, 4) * usableFreqBins;
+                    xPos = i * width / usableFreqBins;
+                    value = frequencyData[Math.floor(logIndex)] / 255.0;
+                } else {
+                    xPos = i * width / usableFreqBins;
+                    value = frequencyData[i] / 255.0;
+                }
+
+                const yPos = height - (value * height);
+
+                if (i === 0) {
+                    frequencyAnalyzerCtx.moveTo(xPos, yPos);
+                } else {
+                    frequencyAnalyzerCtx.lineTo(xPos, yPos);
+                }
+            }
+
+            frequencyAnalyzerCtx.stroke();
+        }
+
+        function drawMidSideFrequency(midData, sideData) {
+            const width = frequencyAnalyzerCanvas.width / window.devicePixelRatio;
+            const height = frequencyAnalyzerCanvas.height / window.devicePixelRatio;
+
+            frequencyAnalyzerCtx.clearRect(0, 0, width, height);
+
+            // Draw background grid
+            frequencyAnalyzerCtx.strokeStyle = 'var(--grid-color)';
+            frequencyAnalyzerCtx.lineWidth = 1;
+
+            // Horizontal lines
+            for (let i = 0; i <= 5; i++) {
+                const y = height * i / 5;
+                frequencyAnalyzerCtx.beginPath();
+                frequencyAnalyzerCtx.moveTo(0, y);
+                frequencyAnalyzerCtx.lineTo(width, y);
+                frequencyAnalyzerCtx.stroke();
+            }
+
+            const rangeFactor = parseFloat(frequencyRange.value);
+            const usableBins = Math.floor(midData.length * rangeFactor);
+
+            // Draw mid content
+            frequencyAnalyzerCtx.strokeStyle = 'var(--mid-color)';
+            frequencyAnalyzerCtx.lineWidth = 2;
+            frequencyAnalyzerCtx.beginPath();
+
+            for (let i = 0; i < usableBins; i++) {
+                // Logarithmic frequency scale
+                const logIndex = Math.pow(i / usableBins, 3) * usableBins;
+                const x = i * width / usableBins;
+                const y = height - (midData[Math.floor(logIndex)] * height);
+
+                if (i === 0) {
+                    frequencyAnalyzerCtx.moveTo(x, y);
+                } else {
+                    frequencyAnalyzerCtx.lineTo(x, y);
+                }
+            }
+
+            frequencyAnalyzerCtx.stroke();
+
+            // Draw side content
+            frequencyAnalyzerCtx.strokeStyle = 'var(--side-color)';
+            frequencyAnalyzerCtx.lineWidth = 2;
+            frequencyAnalyzerCtx.beginPath();
+
+            for (let i = 0; i < usableBins; i++) {
+                // Logarithmic frequency scale
+                const logIndex = Math.pow(i / usableBins, 3) * usableBins;
+                const x = i * width / usableBins;
+                const y = height - (sideData[Math.floor(logIndex)] * height);
+
+                if (i === 0) {
+                    frequencyAnalyzerCtx.moveTo(x, y);
+                } else {
+                    frequencyAnalyzerCtx.lineTo(x, y);
+                }
+            }
+
+            frequencyAnalyzerCtx.stroke();
+
+            // Fill area between mid and side
+            frequencyAnalyzerCtx.fillStyle = 'rgba(83, 191, 157, 0.1)';
+            frequencyAnalyzerCtx.beginPath();
+
+            // Draw mid line
+            for (let i = 0; i < usableBins; i++) {
+                const logIndex = Math.pow(i / usableBins, 3) * usableBins;
+                const x = i * width / usableBins;
+                const y = height - (midData[Math.floor(logIndex)] * height);
+
+                if (i === 0) {
+                    frequencyAnalyzerCtx.moveTo(x, y);
+                } else {
+                    frequencyAnalyzerCtx.lineTo(x, y);
+                }
+            }
+
+            // Draw side line in reverse
+            for (let i = usableBins - 1; i >= 0; i--) {
+                const logIndex = Math.pow(i / usableBins, 3) * usableBins;
+                const x = i * width / usableBins;
+                const y = height - (sideData[Math.floor(logIndex)] * height);
+
+                frequencyAnalyzerCtx.lineTo(x, y);
+            }
+
+            frequencyAnalyzerCtx.closePath();
+            frequencyAnalyzerCtx.fill();
+        }
+
+        function drawLeftRightFrequency(leftFreqData, rightFreqData) {
+            const width = frequencyAnalyzerCanvas.width / window.devicePixelRatio;
+            const height = frequencyAnalyzerCanvas.height / window.devicePixelRatio;
+
+            frequencyAnalyzerCtx.clearRect(0, 0, width, height);
+
+            // Draw background grid
+            frequencyAnalyzerCtx.strokeStyle = 'var(--grid-color)';
+            frequencyAnalyzerCtx.lineWidth = 1;
+
+            // Horizontal lines
+            for (let i = 0; i <= 5; i++) {
+                const y = height * i / 5;
+                frequencyAnalyzerCtx.beginPath();
+                frequencyAnalyzerCtx.moveTo(0, y);
+                frequencyAnalyzerCtx.lineTo(width, y);
+                frequencyAnalyzerCtx.stroke();
+            }
+
+            const rangeFactor = parseFloat(frequencyRange.value);
+            const usableBins = Math.floor(leftFreqData.length * rangeFactor);
+
+            // Draw left channel
+            frequencyAnalyzerCtx.strokeStyle = 'var(--left-color)';
+            frequencyAnalyzerCtx.lineWidth = 2;
+            frequencyAnalyzerCtx.beginPath();
+
+            for (let i = 0; i < usableBins; i++) {
+                // Logarithmic frequency scale
+                const logIndex = Math.pow(i / usableBins, 3) * usableBins;
+                const x = i * width / usableBins;
+                const y = height - ((leftFreqData[Math.floor(logIndex)] / 255) * height);
+
+                if (i === 0) {
+                    frequencyAnalyzerCtx.moveTo(x, y);
+                } else {
+                    frequencyAnalyzerCtx.lineTo(x, y);
+                }
+            }
+
+            frequencyAnalyzerCtx.stroke();
+
+            // Draw right channel
+            frequencyAnalyzerCtx.strokeStyle = 'var(--right-color)';
+            frequencyAnalyzerCtx.lineWidth = 2;
+            frequencyAnalyzerCtx.beginPath();
+
+            for (let i = 0; i < usableBins; i++) {
+                // Logarithmic frequency scale
+                const logIndex = Math.pow(i / usableBins, 3) * usableBins;
+                const x = i * width / usableBins;
+                const y = height - ((rightFreqData[Math.floor(logIndex)] / 255) * height);
+
+                if (i === 0) {
+                    frequencyAnalyzerCtx.moveTo(x, y);
+                } else {
+                    frequencyAnalyzerCtx.lineTo(x, y);
+                }
+            }
+
+            frequencyAnalyzerCtx.stroke();
+
+            // Fill area between left and right
+            frequencyAnalyzerCtx.fillStyle = 'rgba(76, 201, 240, 0.1)';
+            frequencyAnalyzerCtx.beginPath();
+
+            // Draw left line
+            for (let i = 0; i < usableBins; i++) {
+                const logIndex = Math.pow(i / usableBins, 3) * usableBins;
+                const x = i * width / usableBins;
+                const y = height - ((leftFreqData[Math.floor(logIndex)] / 255) * height);
+
+                if (i === 0) {
+                    frequencyAnalyzerCtx.moveTo(x, y);
+                } else {
+                    frequencyAnalyzerCtx.lineTo(x, y);
+                }
+            }
+
+            // Draw right line in reverse
+            for (let i = usableBins - 1; i >= 0; i--) {
+                const logIndex = Math.pow(i / usableBins, 3) * usableBins;
+                const x = i * width / usableBins;
+                const y = height - ((rightFreqData[Math.floor(logIndex)] / 255) * height);
+
+                frequencyAnalyzerCtx.lineTo(x, y);
+            }
+
+            frequencyAnalyzerCtx.closePath();
+            frequencyAnalyzerCtx.fill();
+        }
+
+        function drawWaterfallView(frequencyData, history, maxLines) {
+            const width = frequencyAnalyzerCanvas.width / window.devicePixelRatio;
+            const height = frequencyAnalyzerCanvas.height / window.devicePixelRatio;
+
+            frequencyAnalyzerCtx.clearRect(0, 0, width, height);
+
+            // Add current frequency data to history
+            const rangeFactor = parseFloat(frequencyRange.value);
+            const usableBins = Math.floor(frequencyData.length * rangeFactor);
+            const lineData = new Uint8Array(usableBins);
+
+            for (let i = 0; i < usableBins; i++) {
+                // Use logarithmic frequency scale
+                const logIndex = Math.pow(i / usableBins, 3) * usableBins;
+                lineData[i] = frequencyData[Math.floor(logIndex)];
+            }
+
+            history.unshift(lineData);
+
+            // Limit history size
+            if (history.length > maxLines) {
+                history.pop();
+            }
+
+            // Draw waterfall
+            const lineHeight = height / maxLines;
+
+            for (let line = 0; line < history.length; line++) {
+                const y = line * lineHeight;
+
+                for (let i = 0; i < usableBins; i++) {
+                    const x = i * width / usableBins;
+                    const value = history[line][i] / 255;
+
+                    // Color mapping based on frequency intensity - FL Studio colors
+                    const colorFactor = parseFloat(colorIntensity.value);
+                    let r, g, b;
+
+                    if (value < 0.3) {
+                        r = 0;
+                        g = value * 255 * 3 * colorFactor;
+                        b = 255 * colorFactor;
+                    } else if (value < 0.6) {
+                        r = (value - 0.3) * 255 * 3 * colorFactor;
+                        g = 255 * colorFactor;
+                        b = (0.6 - value) * 255 * 3 * colorFactor;
+                    } else {
+                        r = 255 * colorFactor;
+                        g = (1 - value) * 255 * 2.5 * colorFactor;
+                        b = 0;
+                    }
+
+                    frequencyAnalyzerCtx.fillStyle = `rgb(${Math.min(255, r)}, ${Math.min(255, g)}, ${Math.min(255, b)})`;
+                    frequencyAnalyzerCtx.fillRect(x, y, width / usableBins + 1, lineHeight + 1);
+                }
+            }
+        }
+
+        function drawCorrelation(correlation) {
+            const width = correlationCanvas.width / window.devicePixelRatio;
+            const height = correlationCanvas.height / window.devicePixelRatio;
+
+            correlationCtx.clearRect(0, 0, width, height);
+
+            // Draw background
+            correlationCtx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+            correlationCtx.fillRect(0, 0, width, height);
+
+            // Draw correlation meter
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const radius = Math.min(centerX, centerY) * 0.8;
+
+            // Draw meter background
+            correlationCtx.strokeStyle = 'var(--grid-color)';
+            correlationCtx.lineWidth = 1;
+            correlationCtx.beginPath();
+            correlationCtx.arc(centerX, centerY, radius, 0, Math.PI, true);
+            correlationCtx.stroke();
+
+            // Draw scale marks
+            for (let i = -1; i <= 1; i += 0.5) {
+                const angle = Math.PI * (1 - (i + 1) / 2);
+                const x1 = centerX + Math.cos(angle) * radius;
+                const y1 = centerY + Math.sin(angle) * radius;
+                const x2 = centerX + Math.cos(angle) * (radius - 10);
+                const y2 = centerY + Math.sin(angle) * (radius - 10);
+
+                correlationCtx.beginPath();
+                correlationCtx.moveTo(x1, y1);
+                correlationCtx.lineTo(x2, y2);
+                correlationCtx.stroke();
+
+                // Labels
+                correlationCtx.fillStyle = 'var(--text-color)';
+                correlationCtx.font = '10px Roboto Mono';
+                correlationCtx.textAlign = 'center';
+
+                const labelX = centerX + Math.cos(angle) * (radius + 15);
+                const labelY = centerY + Math.sin(angle) * (radius + 15);
+                correlationCtx.fillText(i.toString(), labelX, labelY);
+            }
+
+            // Draw needle
+            const angle = Math.PI * (1 - (correlation + 1) / 2);
+            const needleLength = radius - 10;
+
+            correlationCtx.strokeStyle = correlation > 0 ? 'var(--fl-blue)' : 'var(--meter-peak)';
+            correlationCtx.lineWidth = 3;
+            correlationCtx.beginPath();
+            correlationCtx.moveTo(centerX, centerY);
+            correlationCtx.lineTo(
+                centerX + Math.cos(angle) * needleLength,
+                centerY + Math.sin(angle) * needleLength
+            );
+            correlationCtx.stroke();
+
+            // Draw center point
+            correlationCtx.fillStyle = 'white';
+            correlationCtx.beginPath();
+            correlationCtx.arc(centerX, centerY, 5, 0, Math.PI * 2);
+            correlationCtx.fill();
+
+            // Labels
+            correlationCtx.fillStyle = 'var(--text-color)';
+            correlationCtx.font = '12px Roboto Mono';
+            correlationCtx.textAlign = 'center';
+            correlationCtx.fillText('OUT OF PHASE', width / 4, height - 10);
+            correlationCtx.fillText('IN PHASE', width * 3 / 4, height - 10);
+        }
+
+        function drawStereoWidth(leftFreqData, rightFreqData) {
+            const width = stereoWidthCanvas.width / window.devicePixelRatio;
+            const height = stereoWidthCanvas.height / window.devicePixelRatio;
+
+            stereoWidthCtx.clearRect(0, 0, width, height);
+
+            // Draw background
+            stereoWidthCtx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+            stereoWidthCtx.fillRect(0, 0, width, height);
+
+            // Draw grid
+            stereoWidthCtx.strokeStyle = 'var(--grid-color)';
+            stereoWidthCtx.lineWidth = 1;
+
+            // Horizontal lines
+            for (let i = 0; i <= 10; i++) {
+                const y = height * i / 10;
+                stereoWidthCtx.beginPath();
+                stereoWidthCtx.moveTo(0, y);
+                stereoWidthCtx.lineTo(width, y);
+                stereoWidthCtx.stroke();
+            }
+
+            // Frequency bands
+            const bands = 32;
+            const bandWidth = width / bands;
+
+            // Calculate stereo width per frequency band
+            const rangeFactor = parseFloat(frequencyRange.value);
+            const usableBins = Math.floor(leftFreqData.length * rangeFactor);
+            const binsPerBand = Math.floor(usableBins / bands);
+
+            // Draw stereo width spectrum
+            stereoWidthCtx.fillStyle = 'var(--fl-blue)';
+
+            for (let band = 0; band < bands; band++) {
+                let leftSum = 0, rightSum = 0;
+
+                // Calculate average energy in this frequency band
+                for (let i = 0; i < binsPerBand; i++) {
+                    const idx = Math.floor(Math.pow((band * binsPerBand + i) / usableBins, 2) * usableBins);
+                    if (idx < leftFreqData.length) {
+                        leftSum += leftFreqData[idx] / 255;
+                        rightSum += rightFreqData[idx] / 255;
+                    }
+                }
+
+                const leftAvg = leftSum / binsPerBand;
+                const rightAvg = rightSum / binsPerBand;
+
+                // Calculate stereo width for this band
+                const mid = (leftAvg + rightAvg) / 2;
+                const side = Math.abs(leftAvg - rightAvg);
+                const widthFactor = mid > 0 ? Math.min(1, side / mid * 2) : 0;
+
+                // Draw stereo width bar
+                const x = band * bandWidth;
+                const barHeight = height * widthFactor;
+
+                // Create gradient based on stereo width
+                const gradient = stereoWidthCtx.createLinearGradient(0, height, 0, height - barHeight);
+                gradient.addColorStop(0, 'rgba(0, 196, 255, 0.3)');
+                gradient.addColorStop(1, 'rgba(0, 196, 255, 0.8)');
+
+                stereoWidthCtx.fillStyle = gradient;
+                stereoWidthCtx.fillRect(x, height - barHeight, bandWidth - 1, barHeight);
+            }
+
+            // Draw frequency scale
+            stereoWidthCtx.fillStyle = 'var(--text-color)';
+            stereoWidthCtx.font = '10px Roboto Mono';
+            stereoWidthCtx.textAlign = 'center';
+
+            const freqLabels = ['20Hz', '100Hz', '1kHz', '10kHz', '20kHz'];
+            const positions = [0, 0.2, 0.6, 0.9, 1.0];
+
+            for (let i = 0; i < freqLabels.length; i++) {
+                const x = width * positions[i];
+                stereoWidthCtx.fillText(freqLabels[i], x, 15);
+            }
+
+            // Draw width scale
+            stereoWidthCtx.textAlign = 'right';
+            stereoWidthCtx.fillText('Mono', width - 10, height - 10);
+            stereoWidthCtx.fillText('Wide', width - 10, 25);
+        }
+
+        function drawSpectrogram(frequencyData, offset) {
+            const width = spectrogramCanvas.width / window.devicePixelRatio;
+            const height = spectrogramCanvas.height / window.devicePixelRatio;
+
+            // Move existing spectrogram data
+            const imageData = spectrogramCtx.getImageData(1, 0, width - 1, height);
+            spectrogramCtx.putImageData(imageData, 0, 0);
+
+            // Draw new column of data
+            const rangeFactor = parseFloat(frequencyRange.value);
+            const colorFactor = parseFloat(colorIntensity.value);
+
+            for (let i = 0; i < frequencyData.length * rangeFactor; i++) {
+                // Use logarithmic scale for frequency
+                const logIndex = Math.pow(i / (frequencyData.length * rangeFactor), 2) * frequencyData.length * rangeFactor;
+                const value = frequencyData[Math.floor(logIndex)] / 255.0;
+
+                // Invert Y axis so low frequencies are at the bottom
+                const y = height - (i / (frequencyData.length * rangeFactor)) * height;
+
+                // Color mapping based on frequency intensity - FL Studio colors
+                let r, g, b;
+
+                if (value < 0.3) {
+                    r = 0;
+                    g = value * 255 * 3;
+                    b = 255;
+                } else if (value < 0.6) {
+                    r = (value - 0.3) * 255 * 3;
+                    g = 255;
+                    b = (0.6 - value) * 255 * 3;
+                } else {
+                    r = 255;
+                    g = (1 - value) * 255 * 2.5;
+                    b = 0;
+                }
+
+                // Apply color intensity
+                r *= colorFactor;
+                g *= colorFactor;
+                b *= colorFactor;
+
+                spectrogramCtx.fillStyle = `rgb(${Math.min(255, r)}, ${Math.min(255, g)}, ${Math.min(255, b)})`;
+                spectrogramCtx.fillRect(width - 1, y, 1, 2);
+            }
+        }
+
+        function simulateMasteringAssistant(initialMessage) {
+            assistantModule.classList.add('assistant-active');
+            assistantContent.textContent = initialMessage;
+            setTimeout(() => {
+                if (!isPlaying) return;
+                const insights = [
+                    "Frequency balance: Good low-end presence, but mid-range (2-5kHz) could be enhanced for clarity.",
+                    "Stereo field: Wide stereo image in high frequencies, but mono-compatible. Phase correlation is positive.",
+                    "Dynamic range: Crest factor of 12dB suggests moderate compression. Consider gentle limiting for final loudness.",
+                    "LUFS target: Currently averaging -14 LUFS, suitable for streaming platforms.",
+                    "Mid/Side balance: Good center image with vocals/bass, side content well distributed across spectrum.",
+                    "Frequency masking detected between bass (80-120Hz) and low-mids (200-300Hz).",
+                    "Transient response is well preserved, suggesting appropriate attack/release settings.",
+                    "Spectral balance shows good clarity in high frequencies with no harsh resonances.",
+                    "Low-end is well controlled with no excessive sub-bass energy below 40Hz.",
+                    "Stereo width is consistent across frequency spectrum with no phase issues.",
+                    "Recommended: Gentle 2dB boost at 3kHz for vocal presence.",
+                    "Recommended: Subtle multi-band compression on low-mids (200-500Hz).",
+                    "FL Studio Parametric EQ 2 suggestion: +2dB shelf at 10kHz for air and brightness.",
+                    "FL Studio Maximus suggestion: Adjust mid-band threshold to -18dB for better punch.",
+                    "FL Studio Fruity Limiter suggestion: Set ceiling to -0.3dB to avoid intersample peaks.",
+                    "New: Consider adding stereo enhancement in highs for better immersion.",
+                    "New: Check for clipping in transients; apply soft knee compression.",
+                    "New: Integrate with xAI API for advanced AI mastering suggestions (visit https://x.ai/api for details)."
+                ];
+                const selectedInsights = [];
+                const count = Math.floor(Math.random() * 3) + 4;
+                while (selectedInsights.length < count) {
+                    const insight = insights[Math.floor(Math.random() * insights.length)];
+                    if (!selectedInsights.includes(insight)) selectedInsights.push(insight);
+                }
+                assistantContent.innerHTML = "SonicScope Analysis:<br>• " + selectedInsights.join("<br>• ");
+            }, 2000);
+        }
+
+        stereoFieldViewButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                stereoFieldViewButtons.forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                currentStereoView = button.dataset.view;
+            });
+        });
+
+        frequencyViewButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                frequencyViewButtons.forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                currentFrequencyView = button.dataset.view;
+            });
+        });
+
+        window.addEventListener('resize', resizeCanvases);
+
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').then(() => {
+                console.log('Service Worker registered');
+            }).catch(err => {
+                console.error('Service Worker registration failed:', err);
+            });
+        }
+
+        resizeCanvases();
